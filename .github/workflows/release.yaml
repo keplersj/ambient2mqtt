@@ -1,9 +1,10 @@
 name: release
 
-# Fires when release-please publishes a GitHub Release (tag vX.Y.Z).
+# Fires on a vX.Y.Z tag. release-please pushes those tags when its release PR merges;
+# you can also push one by hand for the first release.
 on:
-  release:
-    types: [published]
+  push:
+    tags: ["v*"]
 
 permissions:
   contents: read
