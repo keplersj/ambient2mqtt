@@ -282,10 +282,23 @@ class Bridge:
             else:
                 log.warning("Unhandled command topic %s", topic)
                 return
-            await asyncio.sleep(1.5)
-            await self.refresh(discovery=False)
+            await self._settle()
         except Exception as e:  # noqa: BLE001
             log.exception("command failed: %s", e)
+
+    # Re-publish state as the device reports the result of a command. Lights reflect
+    # almost instantly, but some devices (notably the lock) only report their new
+    # state ~30-40s later, so re-poll a few times instead of waiting for the next
+    # full sync. Delays are cumulative (~2s, 12s, 37s, 82s after the command).
+    _SETTLE_DELAYS = (2, 10, 25, 45)
+
+    async def _settle(self) -> None:
+        for delay in self._SETTLE_DELAYS:
+            await asyncio.sleep(delay)
+            try:
+                await self.refresh(discovery=False)
+            except Exception as e:  # noqa: BLE001
+                log.error("settle refresh error: %s", e)
 
     async def refresh(self, *, discovery: bool = True) -> None:
         world = await self.client.get_world()
