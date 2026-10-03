@@ -76,6 +76,20 @@ All configuration is via environment variables:
 | `DISCOVERY_PREFIX` | `homeassistant` | must match HA's MQTT discovery prefix |
 | `SYNC_INTERVAL` | `30` | seconds between polls |
 | `LOG_LEVEL` | `INFO` | |
+| `DEVICE_OVERRIDES` | `{}` | JSON map of `deviceId → entity type` to re-type a device (see below) |
+
+### Device type overrides
+
+Some switches actually drive a ceiling fan, exhaust fan, etc. rather than a light. Re-type
+them with `DEVICE_OVERRIDES`, a JSON object of `deviceId` → `"fan"` / `"switch"` / `"light"`:
+
+```bash
+DEVICE_OVERRIDES={"<device-uuid-a>":"fan","<device-uuid-b>":"fan"}
+```
+
+The device UUIDs are the `ambient_<uuid>` unique IDs shown in Home Assistant (or in the
+bridge's discovery logs). A dimmer re-typed to `fan` exposes its level as fan speed; an
+on/off switch becomes a simple on/off fan.
 
 ## Development
 

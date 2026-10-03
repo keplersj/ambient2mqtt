@@ -25,6 +25,9 @@ bridge:
   discoveryPrefix: homeassistant
   syncInterval: 30
   logLevel: INFO
+  # Re-type devices Ambient misreports, e.g. a switch driving a fan.
+  # Map of deviceId -> "fan" | "switch" | "light".
+  deviceOverrides: {}
 
 replicaCount: 1
 

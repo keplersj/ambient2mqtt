@@ -148,9 +148,11 @@ def build_discovery(
     discovery_prefix: str,
     availability_topic: str,
     space_names: dict[str, str],
+    overrides: dict[str, str] | None = None,
 ) -> list[tuple[str, dict]]:
     """Return a list of (component, discovery-payload) for a device, or []."""
     did = dev["deviceId"]
+    override = (overrides or {}).get(did)
     traits = dev.get("traits", {})
     info = _info(dev)
     state_t = f"{base}/{did}/state"
@@ -178,11 +180,45 @@ def build_discovery(
 
     # --- primary entity ---
     if "lightReadV1" in traits:
-        cfg = {**common, "schema": "json", "state_topic": state_t, "command_topic": set_t}
-        if traits["lightReadV1"].get("capability") == "LIGHT_CAPABILITY_TYPE_DIMMER":
-            cfg["brightness"] = True
-            cfg["brightness_scale"] = 100
-        configs.append(("light", cfg))
+        is_dimmer = traits["lightReadV1"].get("capability") == "LIGHT_CAPABILITY_TYPE_DIMMER"
+        if override == "fan":
+            cfg = {
+                **common,
+                "state_topic": state_t,
+                "state_value_template": "{{ value_json.state }}",
+                "command_topic": set_t,
+                "payload_on": "ON",
+                "payload_off": "OFF",
+            }
+            if is_dimmer:  # map the dimmer level to fan speed
+                cfg["percentage_state_topic"] = state_t
+                cfg["percentage_value_template"] = "{{ value_json.brightness | default(0) }}"
+                cfg["percentage_command_topic"] = f"{base}/{did}/percentage/set"
+                cfg["speed_range_min"] = 1
+                cfg["speed_range_max"] = 100
+            configs.append(("fan", cfg))
+        elif override == "switch":
+            configs.append(
+                (
+                    "switch",
+                    {
+                        **common,
+                        "state_topic": state_t,
+                        "value_template": "{{ value_json.state }}",
+                        "command_topic": set_t,
+                        "payload_on": "ON",
+                        "payload_off": "OFF",
+                        "state_on": "ON",
+                        "state_off": "OFF",
+                    },
+                )
+            )
+        else:
+            cfg = {**common, "schema": "json", "state_topic": state_t, "command_topic": set_t}
+            if is_dimmer:
+                cfg["brightness"] = True
+                cfg["brightness_scale"] = 100
+            configs.append(("light", cfg))
     elif "lockerReadV1" in traits:
         configs.append(
             (
@@ -334,6 +370,7 @@ class Bridge:
             client.subscribe(f"{self.s.base_topic}/+/temp/set")
             client.subscribe(f"{self.s.base_topic}/+/mode/set")
             client.subscribe(f"{self.s.base_topic}/+/fan/set")
+            client.subscribe(f"{self.s.base_topic}/+/percentage/set")
             if self._loop:
                 self._loop.call_soon_threadsafe(self._connected.set)
         else:
@@ -350,6 +387,7 @@ class Bridge:
                 discovery_prefix=self.s.discovery_prefix,
                 availability_topic=self.avail_topic,
                 space_names=self._space_names,
+                overrides=self.s.device_overrides,
             ):
                 topic = f"{self.s.discovery_prefix}/{component}/{payload['unique_id']}/config"
                 self.mqtt.publish(topic, json.dumps(payload), qos=1, retain=True)
@@ -414,6 +452,13 @@ class Bridge:
                 else:
                     log.warning("Unknown fan mode %r", payload)
                     return
+            elif sub == "percentage/set":
+                # fan-override speed -> dimmer level on the underlying light-capable switch
+                pct = int(payload)
+                if pct <= 0:
+                    await self.client.set_light(device_id, on=False)
+                else:
+                    await self.client.set_light(device_id, on=True, brightness=pct)
             else:
                 log.warning("Unhandled command topic %s", topic)
                 return

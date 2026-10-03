@@ -3,7 +3,7 @@
 import pytest
 
 from ambient2mqtt import config
-from ambient2mqtt.config import Settings
+from ambient2mqtt.config import Settings, _parse_overrides
 
 _ENV_VARS = [
     "AMBIENT_USERNAME",
@@ -61,3 +61,19 @@ def test_from_env_overrides(clean_env, monkeypatch):
     assert s.mqtt_port == 1884
     assert s.mqtt_tls is True
     assert s.sync_interval == 15
+
+
+def test_parse_overrides():
+    assert _parse_overrides("") == {}
+    assert _parse_overrides("not json") == {}
+    assert _parse_overrides('{"a":"fan","b":"switch","c":"nope"}') == {"a": "fan", "b": "switch"}
+
+
+def test_from_env_device_overrides(clean_env, monkeypatch):
+    monkeypatch.setenv("DEVICE_OVERRIDES", '{"dev-1":"fan"}')
+    assert Settings.from_env().device_overrides == {"dev-1": "fan"}
+
+
+def test_from_env_no_overrides_default(clean_env, monkeypatch):
+    monkeypatch.delenv("DEVICE_OVERRIDES", raising=False)
+    assert Settings.from_env().device_overrides == {}

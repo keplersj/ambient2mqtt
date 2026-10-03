@@ -189,6 +189,30 @@ def test_state_lock_with_aux():
     }
 
 
+def test_override_switch_to_fan():
+    ((component, cfg),) = build_discovery(SWITCH, overrides={"dev-switch": "fan"}, **DISCOVERY_KW)
+    assert component == "fan"
+    assert cfg["command_topic"] == "ambient2mqtt/dev-switch/set"
+    assert cfg["state_value_template"] == "{{ value_json.state }}"
+    assert "percentage_command_topic" not in cfg  # on/off switch -> no speed
+
+
+def test_override_dimmer_to_fan_has_speed():
+    ((component, cfg),) = build_discovery(DIMMER, overrides={"dev-dimmer": "fan"}, **DISCOVERY_KW)
+    assert component == "fan"
+    assert cfg["percentage_command_topic"] == "ambient2mqtt/dev-dimmer/percentage/set"
+
+
+def test_override_to_switch():
+    ((component, _),) = build_discovery(SWITCH, overrides={"dev-switch": "switch"}, **DISCOVERY_KW)
+    assert component == "switch"
+
+
+def test_no_override_stays_light():
+    ((component, _),) = build_discovery(SWITCH, **DISCOVERY_KW)
+    assert component == "light"
+
+
 def test_discovery_aux_entities_distinct_ids():
     configs = build_discovery(LOCK_AUX, **DISCOVERY_KW)
     assert {c for c, _ in configs} == {"lock", "sensor", "binary_sensor"}
