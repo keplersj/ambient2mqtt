@@ -30,17 +30,21 @@ Releases are automated with [release-please](https://github.com/googleapis/relea
 3. `release.yaml` (triggered by the `v*` tag) builds and pushes the multi-arch image to
    `ghcr.io/keplersj/ambient2mqtt` and the Helm chart to `oci://ghcr.io/keplersj/charts`.
 
-For step 3 to run automatically, release-please must push the tag with a token other than
-the default `GITHUB_TOKEN` (GitHub does not run workflows off events created by that token).
-Create a repository secret **`RELEASE_PLEASE_TOKEN`**:
+For step 3 to run automatically, release-please must push the tag with a token other than the
+default `GITHUB_TOKEN` (GitHub does not run workflows off events created by that token). This
+repo uses a **GitHub App** token (no expiring secret to rotate). One-time setup:
 
-- a fine-grained PAT scoped to this repo with **Contents: Read and write** and
-  **Pull requests: Read and write** (a classic PAT with `repo` also works), or a GitHub App
-  installation token;
-- add it under *Settings → Secrets and variables → Actions*.
+1. Create a GitHub App (*Settings → Developer settings → GitHub Apps → New*) with repository
+   permissions **Contents: Read and write** and **Pull requests: Read and write**. Generate a
+   private key.
+2. Install the App on the `keplersj/ambient2mqtt` repository.
+3. Add the App's ID as the repository **variable** `RELEASE_APP_ID`, and the private key as the
+   repository **secret** `RELEASE_APP_PRIVATE_KEY` (*Settings → Secrets and variables → Actions*).
 
-Without that secret, release-please still manages the release PR, but you cut the release by
-pushing the tag yourself: `git tag vX.Y.Z && git push origin vX.Y.Z`.
+`release-please.yaml` then mints a short-lived installation token per run via
+`actions/create-github-app-token`. Until the App is configured, it falls back to `GITHUB_TOKEN`:
+the release PR still works, but you cut the release by pushing the tag yourself —
+`git tag vX.Y.Z && git push origin vX.Y.Z`.
 
 ## Please don't
 
