@@ -15,11 +15,13 @@ and sensors in your unit show up as native Home Assistant entities.
 |---|---|
 | Login + device discovery | ✅ working |
 | Lights (on/off + brightness) | ✅ verified |
-| Lock (lock/unlock) | ⚠️ implemented; depends on the lock being online/reachable |
-| Thermostat (setpoints) | ⚠️ implemented; depends on the thermostat being online/reachable |
+| Lock (lock/unlock) | ✅ verified — note the reported state can lag ~30–40s behind the command |
+| Thermostat (setpoints) | ⚠️ implemented; not yet verified against an online thermostat |
 | Motion / leak sensors | ✅ state passthrough when the device reports it |
 
-State is refreshed by polling (default every 30s); there is no push channel yet.
+State is refreshed by polling (default every 30s); there is no push channel yet. Some
+devices (notably the lock) also report their own state slowly, so a change can take tens
+of seconds to appear in Home Assistant.
 
 ## How it works
 
