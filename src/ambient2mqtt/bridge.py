@@ -47,40 +47,98 @@ def _info(dev: dict) -> dict:
     return dev.get("traits", {}).get("infoV1", {})
 
 
+def _field(dev: dict, trait_key: str, field: str):
+    """Read a trait field, tolerating either a nested `status` object or a flat trait."""
+    t = dev.get("traits", {}).get(trait_key, {})
+    status = t.get("status") if isinstance(t, dict) else None
+    if isinstance(status, dict) and field in status:
+        return status[field]
+    return t.get(field) if isinstance(t, dict) else None
+
+
+def _binary(value, on_value: str) -> str | None:
+    """Map an enum string to ON/OFF, or None when unknown/unset."""
+    if not value:
+        return None
+    return "ON" if value == on_value else "OFF"
+
+
+def _connectivity(dev: dict) -> str | None:
+    cs = _field(dev, "connectivityReadV1", "connectivityStatus")
+    if cs:
+        return "ON" if cs == "CONNECTIVITY_STATUS_REACHABLE" else "OFF"
+    r = _field(dev, "reachabilityReadV1", "reachable")
+    if isinstance(r, bool):
+        return "ON" if r else "OFF"
+    return None
+
+
+FAN_TO_HA = {
+    "FAN_MODE_AUTO": "auto",
+    "FAN_MODE_ON": "on",
+    "FAN_MODE_CIRCULATE": "circulate",
+    "FAN_MODE_OFF": "off",
+}
+HA_TO_FAN = {"auto": "FAN_MODE_AUTO", "on": "FAN_MODE_ON", "circulate": "FAN_MODE_CIRCULATE"}
+FAN_MODES = ["auto", "on", "circulate"]
+
+# Primary binary-sensor device types: World trait key -> (state field, ON enum, HA device_class).
+# These are implemented from the decompiled schema; only light/lock/thermostat/motion are
+# exercised against real hardware, so the rest are best-effort for downstream devices.
+_BINARY_PRIMARY = {
+    "motionSensorReadV1": ("motionSensorState", "MOTION_SENSOR_STATE_ACTIVE", "motion"),
+    "leakSensorReadV1": ("leakSensorState", "LEAK_SENSOR_STATE_WET", "moisture"),
+    "accessSensorReadV1": ("accessSensorState", "ACCESS_SENSOR_STATE_OPEN", "opening"),
+    "binarySensorReadV1": ("binarySensorState", "BINARY_SENSOR_STATE_ON", None),
+}
+
+
 def build_state(dev: dict) -> dict | None:
     """Translate an Ambient device's read traits into an HA MQTT state payload."""
     traits = dev.get("traits", {})
+    out: dict = {}
+
     if "lightReadV1" in traits:
         st = traits["lightReadV1"].get("status", {})
-        out: dict = {"state": "ON" if st.get("lightState") == "LIGHT_STATE_ON" else "OFF"}
+        out["state"] = "ON" if st.get("lightState") == "LIGHT_STATE_ON" else "OFF"
         if "levelPercentInt" in st:
             out["brightness"] = st["levelPercentInt"]
-        return out
-    if "lockerReadV1" in traits:
-        ls = traits["lockerReadV1"].get("status", {}).get("lockState", "")
-        return {"state": "LOCKED" if ls == "LOCK_STATE_LOCKED" else "UNLOCKED"}
-    if "thermostatReadV1" in traits:
+    elif "lockerReadV1" in traits:
+        ls = _field(dev, "lockerReadV1", "lockState")
+        out["state"] = "LOCKED" if ls == "LOCK_STATE_LOCKED" else "UNLOCKED"
+    elif "thermostatReadV1" in traits:
         st = traits["thermostatReadV1"].get("status", {})
         mode = HVAC_TO_HA.get(st.get("hvacMode", ""), "off")
-        target = (
+        out["mode"] = mode
+        out["current_temperature"] = st.get("ambientTemperatureCelsius")
+        out["temperature"] = (
             st.get("targetTemperatureHeatCelsius")
             if mode == "heat"
             else st.get("targetTemperatureCoolCelsius")
         )
-        return {
-            "mode": mode,
-            "current_temperature": st.get("ambientTemperatureCelsius"),
-            "temperature": target,
-        }
-    if "motionSensorReadV1" in traits:
-        st = traits["motionSensorReadV1"].get("status", {})
-        return (
-            {"state": "ON" if st["motionDetected"] else "OFF"} if "motionDetected" in st else None
-        )
-    if "leakSensorReadV1" in traits:
-        st = traits["leakSensorReadV1"].get("status", {})
-        return {"state": "ON" if st["leakDetected"] else "OFF"} if "leakDetected" in st else None
-    return None
+        fan = FAN_TO_HA.get(_field(dev, "thermostatReadV1", "fanMode"))
+        if fan:
+            out["fan_mode"] = fan
+    else:
+        for key, (field, on_val, _dc) in _BINARY_PRIMARY.items():
+            if key in traits:
+                state = _binary(_field(dev, key, field), on_val)
+                if state is not None:
+                    out["state"] = state
+                break
+
+    # Auxiliary attributes that ride alongside the primary entity on many devices.
+    battery = _field(dev, "powerReadV1", "batteryLevel")
+    if isinstance(battery, (int, float)):
+        out["battery"] = battery
+    conn = _connectivity(dev)
+    if conn is not None:
+        out["connectivity"] = conn
+    fw = _field(dev, "firmwareReadV1", "version")
+    if fw:
+        out["firmware"] = fw
+
+    return out or None
 
 
 def build_discovery(
@@ -116,14 +174,17 @@ def build_discovery(
         "device": device_block,
     }
 
+    configs: list[tuple[str, dict]] = []
+
+    # --- primary entity ---
     if "lightReadV1" in traits:
         cfg = {**common, "schema": "json", "state_topic": state_t, "command_topic": set_t}
         if traits["lightReadV1"].get("capability") == "LIGHT_CAPABILITY_TYPE_DIMMER":
             cfg["brightness"] = True
             cfg["brightness_scale"] = 100
-        return [("light", cfg)]
-    if "lockerReadV1" in traits:
-        return [
+        configs.append(("light", cfg))
+    elif "lockerReadV1" in traits:
+        configs.append(
             (
                 "lock",
                 {
@@ -137,9 +198,9 @@ def build_discovery(
                     "payload_unlock": "UNLOCK",
                 },
             )
-        ]
-    if "thermostatReadV1" in traits:
-        return [
+        )
+    elif "thermostatReadV1" in traits:
+        configs.append(
             (
                 "climate",
                 {
@@ -150,6 +211,10 @@ def build_discovery(
                     "mode_state_template": "{{ value_json.mode }}",
                     "mode_command_topic": f"{base}/{did}/mode/set",
                     "modes": CLIMATE_MODES,
+                    "fan_mode_state_topic": state_t,
+                    "fan_mode_state_template": "{{ value_json.fan_mode }}",
+                    "fan_mode_command_topic": f"{base}/{did}/fan/set",
+                    "fan_modes": FAN_MODES,
                     "temperature_state_topic": state_t,
                     "temperature_state_template": "{{ value_json.temperature }}",
                     "temperature_command_topic": f"{base}/{did}/temp/set",
@@ -157,36 +222,78 @@ def build_discovery(
                     "temp_step": 0.5,
                 },
             )
-        ]
-    if "motionSensorReadV1" in traits:
-        return [
-            (
-                "binary_sensor",
-                {
+        )
+    else:
+        for key, (_field_name, _on, device_class) in _BINARY_PRIMARY.items():
+            if key in traits:
+                cfg = {
                     **common,
                     "state_topic": state_t,
                     "value_template": "{{ value_json.state }}",
                     "payload_on": "ON",
                     "payload_off": "OFF",
-                    "device_class": "motion",
+                }
+                if device_class:
+                    cfg["device_class"] = device_class
+                configs.append(("binary_sensor", cfg))
+                break
+
+    # --- auxiliary diagnostic entities (battery / connectivity / firmware) ---
+    def aux(suffix: str, name: str, component: str, extra: dict) -> tuple[str, dict]:
+        return (
+            component,
+            {
+                "unique_id": f"ambient_{did}_{suffix}",
+                "name": name,
+                "has_entity_name": True,
+                "availability_topic": availability_topic,
+                "state_topic": state_t,
+                "entity_category": "diagnostic",
+                "device": device_block,
+                **extra,
+            },
+        )
+
+    if "powerReadV1" in traits:
+        configs.append(
+            aux(
+                "battery",
+                "Battery",
+                "sensor",
+                {
+                    "device_class": "battery",
+                    "unit_of_measurement": "%",
+                    "value_template": "{{ value_json.battery }}",
                 },
             )
-        ]
-    if "leakSensorReadV1" in traits:
-        return [
-            (
+        )
+    if "connectivityReadV1" in traits or "reachabilityReadV1" in traits:
+        configs.append(
+            aux(
+                "connectivity",
+                "Connectivity",
                 "binary_sensor",
                 {
-                    **common,
-                    "state_topic": state_t,
-                    "value_template": "{{ value_json.state }}",
+                    "device_class": "connectivity",
                     "payload_on": "ON",
                     "payload_off": "OFF",
-                    "device_class": "moisture",
+                    "value_template": "{{ value_json.connectivity }}",
                 },
             )
-        ]
-    return []
+        )
+    if "firmwareReadV1" in traits:
+        configs.append(
+            aux(
+                "firmware",
+                "Firmware",
+                "sensor",
+                {
+                    "value_template": "{{ value_json.firmware }}",
+                },
+            )
+        )
+
+    return configs
 
 
 class Bridge:
@@ -226,6 +333,7 @@ class Bridge:
             client.subscribe(f"{self.s.base_topic}/+/set")
             client.subscribe(f"{self.s.base_topic}/+/temp/set")
             client.subscribe(f"{self.s.base_topic}/+/mode/set")
+            client.subscribe(f"{self.s.base_topic}/+/fan/set")
             if self._loop:
                 self._loop.call_soon_threadsafe(self._connected.set)
         else:
@@ -243,13 +351,13 @@ class Bridge:
                 availability_topic=self.avail_topic,
                 space_names=self._space_names,
             ):
-                topic = f"{self.s.discovery_prefix}/{component}/ambient_{dev['deviceId']}/config"
+                topic = f"{self.s.discovery_prefix}/{component}/{payload['unique_id']}/config"
                 self.mqtt.publish(topic, json.dumps(payload), qos=1, retain=True)
                 log.info(
                     "Discovery: %s -> %s (%s)",
                     _info(dev).get("name"),
                     component,
-                    dev["deviceId"][:8],
+                    payload["unique_id"],
                 )
         state = build_state(dev)
         if state is not None:
@@ -298,6 +406,13 @@ class Bridge:
                     await self.client.set_thermostat_mode(device_id, system_mode)
                 else:
                     log.warning("Unknown climate mode %r", payload)
+                    return
+            elif sub == "fan/set":
+                fan_mode = HA_TO_FAN.get(payload.strip())
+                if fan_mode:
+                    await self.client.set_fan_mode(device_id, fan_mode)
+                else:
+                    log.warning("Unknown fan mode %r", payload)
                     return
             else:
                 log.warning("Unhandled command topic %s", topic)

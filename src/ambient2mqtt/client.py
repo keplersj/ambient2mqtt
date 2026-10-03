@@ -136,3 +136,10 @@ class AmbientClient:
             "DeviceService/TraitThermostatSetV1SetSystemMode",
             {"systemMode": system_mode, "deviceId": device_id, "accountId": self.account_id},
         )
+
+    async def set_fan_mode(self, device_id: str, fan_mode: str) -> None:
+        """Set thermostat fan mode. fan_mode is a FAN_MODE_* enum name (AUTO/ON/CIRCULATE/OFF)."""
+        await self._rpc(
+            "DeviceService/TraitThermostatSetV1SetFan",
+            {"fanMode": fan_mode, "deviceId": device_id, "accountId": self.account_id},
+        )

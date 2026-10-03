@@ -114,6 +114,91 @@ def test_discovery_climate_has_mode_and_temp_commands():
     assert cfg["temperature_command_topic"] == "ambient2mqtt/dev-thermo/temp/set"
     assert cfg["mode_command_topic"] == "ambient2mqtt/dev-thermo/mode/set"
     assert cfg["modes"] == ["off", "heat", "cool", "auto"]
+    assert cfg["fan_mode_command_topic"] == "ambient2mqtt/dev-thermo/fan/set"
+    assert cfg["fan_modes"] == ["auto", "on", "circulate"]
+
+
+# --- device types not present in the author's unit (blind, from the decomp) ---
+
+ACCESS = {
+    "deviceId": "dev-contact",
+    "spaceId": "space-1",
+    "traits": {
+        "infoV1": {"model": "contact_sensor", "name": "Patio Door"},
+        "accessSensorReadV1": {"status": {"accessSensorState": "ACCESS_SENSOR_STATE_OPEN"}},
+    },
+}
+MOTION = {
+    "deviceId": "dev-motion",
+    "spaceId": "space-1",
+    "traits": {
+        "infoV1": {"model": "motion_sensor", "name": "Hall Motion"},
+        "motionSensorReadV1": {"status": {"motionSensorState": "MOTION_SENSOR_STATE_ACTIVE"}},
+    },
+}
+LEAK = {
+    "deviceId": "dev-leak",
+    "traits": {
+        "infoV1": {"model": "leak_sensor", "name": "Sink"},
+        "leakSensorReadV1": {"status": {"leakSensorState": "LEAK_SENSOR_STATE_DRY"}},
+    },
+}
+# A lock that also reports battery + firmware (fields at the trait root -> exercises the fallback).
+LOCK_AUX = {
+    "deviceId": "dev-lock2",
+    "spaceId": "space-1",
+    "traits": {
+        "infoV1": {"model": "lock", "name": "Side Door"},
+        "lockerReadV1": {"status": {"lockState": "LOCK_STATE_LOCKED"}},
+        "powerReadV1": {"batteryLevel": 87},
+        "firmwareReadV1": {"version": "1.4.2"},
+        "connectivityReadV1": {"status": {"connectivityStatus": "CONNECTIVITY_STATUS_REACHABLE"}},
+    },
+}
+
+
+def test_state_access_open():
+    assert build_state(ACCESS) == {"state": "ON"}
+
+
+def test_state_motion_active():
+    assert build_state(MOTION) == {"state": "ON"}
+
+
+def test_state_leak_dry_is_off():
+    assert build_state(LEAK) == {"state": "OFF"}
+
+
+def test_state_unknown_sensor_value_omitted():
+    dev = {"deviceId": "d", "traits": {"motionSensorReadV1": {"status": {}}}}
+    assert build_state(dev) is None
+
+
+def test_discovery_access_is_opening_binary_sensor():
+    ((component, cfg),) = build_discovery(ACCESS, **DISCOVERY_KW)
+    assert component == "binary_sensor"
+    assert cfg["device_class"] == "opening"
+
+
+def test_state_lock_with_aux():
+    assert build_state(LOCK_AUX) == {
+        "state": "LOCKED",
+        "battery": 87,
+        "firmware": "1.4.2",
+        "connectivity": "ON",
+    }
+
+
+def test_discovery_aux_entities_distinct_ids():
+    configs = build_discovery(LOCK_AUX, **DISCOVERY_KW)
+    assert {c for c, _ in configs} == {"lock", "sensor", "binary_sensor"}
+    uids = {cfg["unique_id"] for _, cfg in configs}
+    assert uids == {
+        "ambient_dev-lock2",
+        "ambient_dev-lock2_battery",
+        "ambient_dev-lock2_firmware",
+        "ambient_dev-lock2_connectivity",
+    }
 
 
 def test_discovery_unknown_device_empty():

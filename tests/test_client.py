@@ -106,3 +106,17 @@ async def test_set_thermostat_mode(monkeypatch, client):
     method, body = calls[0]
     assert method == "DeviceService/TraitThermostatSetV1SetSystemMode"
     assert body == {"systemMode": "SYSTEM_MODE_HEAT", "deviceId": "d1", "accountId": "acct"}
+
+
+async def test_set_fan_mode(monkeypatch, client):
+    calls = []
+
+    async def fake_rpc(method, body):
+        calls.append((method, body))
+        return {}
+
+    monkeypatch.setattr(client, "_rpc", fake_rpc)
+    await client.set_fan_mode("d1", "FAN_MODE_CIRCULATE")
+    method, body = calls[0]
+    assert method == "DeviceService/TraitThermostatSetV1SetFan"
+    assert body == {"fanMode": "FAN_MODE_CIRCULATE", "deviceId": "d1", "accountId": "acct"}
