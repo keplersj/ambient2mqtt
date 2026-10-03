@@ -1,0 +1,14 @@
+ambient2mqtt is installed as {{ include "ambient2mqtt.fullname" . }}.
+
+It publishes to MQTT at {{ .Values.mqtt.host }}:{{ .Values.mqtt.port }} and emits Home
+Assistant discovery under the "{{ .Values.bridge.discoveryPrefix }}/" prefix. Make sure
+Home Assistant's MQTT integration points at the same broker.
+
+{{- if not .Values.ambient.create }}
+
+Credentials come from the existing Secret "{{ .Values.ambient.existingSecret }}"
+(keys AMBIENT_USERNAME / AMBIENT_PASSWORD). Create it before (or alongside) this release.
+{{- end }}
+
+Follow the bridge logs:
+  kubectl logs -n {{ .Release.Namespace }} deploy/{{ include "ambient2mqtt.fullname" . }} -f

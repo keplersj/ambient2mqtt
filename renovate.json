@@ -1,0 +1,17 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    "helpers:pinGitHubActionDigests",
+    ":semanticCommits"
+  ],
+  "lockFileMaintenance": { "enabled": true },
+  "packageRules": [
+    {
+      "description": "Group non-major Python deps",
+      "matchManagers": ["pep621"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "python deps"
+    }
+  ]
+}

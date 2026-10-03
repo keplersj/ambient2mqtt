@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+dist/
+build/
+
+# Env / secrets -- never commit
+.env
+*.env
+!.env.example
+
+# Tooling caches
+.pytest_cache/
+.ruff_cache/
+.ty_cache/
+
+# Editor
+.idea/
+.vscode/

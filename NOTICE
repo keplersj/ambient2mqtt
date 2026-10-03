@@ -1,0 +1,29 @@
+ambient2mqtt
+Copyright 2026 Kepler Sticka-Jones
+
+This product is licensed under the Apache License, Version 2.0.
+
+----------------------------------------------------------------------
+Unofficial / independent project
+----------------------------------------------------------------------
+
+ambient2mqtt is an independent, community project. It is NOT affiliated
+with, authorized, endorsed by, or sponsored by Ambient Property
+Technologies, Level Home Inc., or any related entity. "Ambient", "Level",
+and any related names are trademarks of their respective owners and are
+used here only nominatively, to describe what this software interoperates
+with.
+
+This software is an interoperability client: it talks to the vendor's cloud
+service over ordinary HTTPS using credentials you supply for an account you
+are authorized to use, in order to let you control devices you are
+authorized to control (for example, as a resident of a unit where those
+devices are installed). It contains no vendor software, embeds no vendor
+code or keys, and performs no circumvention of any technical protection
+measure.
+
+Use of this software may be subject to the vendor's Terms of Service and,
+where the devices are provided by a landlord or property manager, to those
+agreements as well. You are responsible for ensuring your use complies with
+any terms that apply to you. The software is provided "AS IS", without
+warranty of any kind (see LICENSE).

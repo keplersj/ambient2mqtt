@@ -1,0 +1,52 @@
+image:
+  repository: ghcr.io/keplersj/ambient2mqtt
+  # Defaults to .Chart.AppVersion when empty.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+# Ambient credentials. Reference an existing Secret with keys AMBIENT_USERNAME /
+# AMBIENT_PASSWORD (and optionally MQTT_USERNAME / MQTT_PASSWORD). This is the
+# recommended path for GitOps (e.g. created by External Secrets).
+ambient:
+  existingSecret: ambient2mqtt-secrets
+  # Or set create=true to render a Secret from the values below (not recommended
+  # for committed GitOps; fine for quick local installs).
+  create: false
+  username: ""
+  password: ""
+
+mqtt:
+  host: mosquitto
+  port: 1883
+  tls: false
+
+bridge:
+  baseTopic: ambient2mqtt
+  discoveryPrefix: homeassistant
+  syncInterval: 30
+  logLevel: INFO
+
+replicaCount: 1
+
+resources:
+  requests:
+    cpu: 10m
+    memory: 96Mi
+  limits:
+    memory: 256Mi
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: ["ALL"]
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+podAnnotations: {}

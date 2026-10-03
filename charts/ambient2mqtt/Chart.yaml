@@ -1,0 +1,15 @@
+apiVersion: v2
+name: ambient2mqtt
+description: Bridge Ambient Smart Home (Level) devices to MQTT with Home Assistant autodiscovery
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://github.com/keplersj/ambient2mqtt
+sources:
+  - https://github.com/keplersj/ambient2mqtt
+keywords:
+  - mqtt
+  - home-assistant
+  - smart-home
+maintainers:
+  - name: keplersj
