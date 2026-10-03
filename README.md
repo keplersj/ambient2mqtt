@@ -16,7 +16,7 @@ and sensors in your unit show up as native Home Assistant entities.
 | Login + device discovery | ✅ working |
 | Lights (on/off + brightness) | ✅ verified |
 | Lock (lock/unlock) | ✅ verified — note the reported state can lag ~30–40s behind the command |
-| Thermostat (setpoints) | ⚠️ control actuates (confirmed on-device), but Ambient's reported state is stale, so HA may show a frozen reading |
+| Thermostat (mode + setpoint) | ⚠️ control works (setpoint actuation confirmed on-device; mode route confirmed), but Ambient's reported state is stale, so HA may show a frozen reading |
 | Motion / leak sensors | ✅ state passthrough when the device reports it |
 
 State is refreshed by polling (default every 30s); there is no push channel yet. Some

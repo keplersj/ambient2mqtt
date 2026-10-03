@@ -129,3 +129,10 @@ class AmbientClient:
         if heat_celsius is not None:
             body["occupiedHeatingSetpoint"] = {"value": int(round(heat_celsius * 100))}
         await self._rpc("DeviceService/TraitThermostatSetV1SetSetpoints", body)
+
+    async def set_thermostat_mode(self, device_id: str, system_mode: str) -> None:
+        """Set HVAC mode. system_mode is a SYSTEM_MODE_* enum name (OFF/HEAT/COOL/AUTO/...)."""
+        await self._rpc(
+            "DeviceService/TraitThermostatSetV1SetSystemMode",
+            {"systemMode": system_mode, "deviceId": device_id, "accountId": self.account_id},
+        )

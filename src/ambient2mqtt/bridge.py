@@ -21,13 +21,25 @@ from .config import Settings
 
 log = logging.getLogger(__name__)
 
+# Supported HA climate modes (match what the Ambient app exposes + what we can set).
+CLIMATE_MODES = ["off", "heat", "cool", "auto"]
+
+# Device read state (hvacMode) -> HA mode. Collapse to the settable set above.
 HVAC_TO_HA = {
     "HVAC_MODE_OFF": "off",
     "HVAC_MODE_COOL": "cool",
     "HVAC_MODE_HEAT": "heat",
     "HVAC_MODE_AUTO": "auto",
-    "HVAC_MODE_HEAT_COOL": "heat_cool",
+    "HVAC_MODE_HEAT_COOL": "auto",
     "HVAC_MODE_ECO": "auto",
+}
+
+# HA mode -> Ambient SetSystemMode enum.
+HA_TO_SYSTEM = {
+    "off": "SYSTEM_MODE_OFF",
+    "heat": "SYSTEM_MODE_HEAT",
+    "cool": "SYSTEM_MODE_COOL",
+    "auto": "SYSTEM_MODE_AUTO",
 }
 
 
@@ -127,7 +139,6 @@ def build_discovery(
             )
         ]
     if "thermostatReadV1" in traits:
-        # Mode is read-only (the setpoint API carries no HVAC-mode field); temperature is settable.
         return [
             (
                 "climate",
@@ -137,7 +148,8 @@ def build_discovery(
                     "current_temperature_template": "{{ value_json.current_temperature }}",
                     "mode_state_topic": state_t,
                     "mode_state_template": "{{ value_json.mode }}",
-                    "modes": ["off", "cool", "heat", "auto", "heat_cool"],
+                    "mode_command_topic": f"{base}/{did}/mode/set",
+                    "modes": CLIMATE_MODES,
                     "temperature_state_topic": state_t,
                     "temperature_state_template": "{{ value_json.temperature }}",
                     "temperature_command_topic": f"{base}/{did}/temp/set",
@@ -213,6 +225,7 @@ class Bridge:
             log.info("MQTT connected")
             client.subscribe(f"{self.s.base_topic}/+/set")
             client.subscribe(f"{self.s.base_topic}/+/temp/set")
+            client.subscribe(f"{self.s.base_topic}/+/mode/set")
             if self._loop:
                 self._loop.call_soon_threadsafe(self._connected.set)
         else:
@@ -279,6 +292,13 @@ class Bridge:
                     await self.client.set_thermostat(device_id, heat_celsius=temp)
                 else:
                     await self.client.set_thermostat(device_id, cool_celsius=temp)
+            elif sub == "mode/set":
+                system_mode = HA_TO_SYSTEM.get(payload.strip())
+                if system_mode:
+                    await self.client.set_thermostat_mode(device_id, system_mode)
+                else:
+                    log.warning("Unknown climate mode %r", payload)
+                    return
             else:
                 log.warning("Unhandled command topic %s", topic)
                 return

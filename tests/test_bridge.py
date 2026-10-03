@@ -108,12 +108,12 @@ def test_discovery_lock_payloads():
     assert cfg["payload_unlock"] == "UNLOCK"
 
 
-def test_discovery_climate_temperature_command_only():
+def test_discovery_climate_has_mode_and_temp_commands():
     ((component, cfg),) = build_discovery(THERMOSTAT, **DISCOVERY_KW)
     assert component == "climate"
     assert cfg["temperature_command_topic"] == "ambient2mqtt/dev-thermo/temp/set"
-    # mode is read-only (the setpoint API carries no HVAC-mode field)
-    assert "mode_command_topic" not in cfg
+    assert cfg["mode_command_topic"] == "ambient2mqtt/dev-thermo/mode/set"
+    assert cfg["modes"] == ["off", "heat", "cool", "auto"]
 
 
 def test_discovery_unknown_device_empty():
