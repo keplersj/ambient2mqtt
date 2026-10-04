@@ -1,8 +1,14 @@
 # ambient2mqtt
 
-Bridge **Ambient Smart Home** (Level) devices to **MQTT**, with **Home Assistant**
-MQTT autodiscovery. Point it at your MQTT broker and the lights, locks, thermostats,
-and sensors in your unit show up as native Home Assistant entities.
+Bridge **Ambient Smart Home** (Level) devices onto **MQTT** — open, vendor-neutral, and
+yours. Point it at your MQTT broker and the lights, locks, thermostats, and sensors in your
+unit become structured, self-describing MQTT entities, auto-announced via the widely-used
+MQTT discovery convention — so Home Assistant and other MQTT-native platforms pick them up
+with no manual config.
+
+Once your devices are on MQTT, they can go anywhere an open standard reaches — dashboards,
+your own automations, or onward to **[Matter](https://csa-iot.org/all-solutions/matter/)**
+through a controller of your choice.
 
 > **Unofficial & independent.** Not affiliated with, authorized, endorsed, or sponsored
 > by Ambient Property Technologies or Level Home. "Ambient" and "Level" are trademarks of
@@ -30,9 +36,10 @@ though setpoint commands take effect — so Home Assistant may lag or not fully 
 ## How it works
 
 `ambient2mqtt` logs into the Ambient cloud with **your own account credentials**, lists the
-devices your account can see, and republishes their state to MQTT using the Home Assistant
-[MQTT discovery](https://www.home-assistant.io/integrations/mqtt/#mqtt-discovery) convention.
-Commands HA publishes on the device command topics are translated back into Ambient API calls.
+devices your account can see, and republishes their state to MQTT using the
+[MQTT discovery](https://www.home-assistant.io/integrations/mqtt/#mqtt-discovery) convention
+(the de-facto scheme popularized by Home Assistant). Commands published back on a device's
+command topic are translated into Ambient API calls.
 
 It is a plain HTTPS/MQTT client: it uses the (observed) cloud API with the credentials you
 provide, embeds no vendor code, and does not circumvent any technical protection. The API
@@ -45,8 +52,8 @@ cp .env.example .env     # fill in AMBIENT_USERNAME / AMBIENT_PASSWORD
 docker compose up -d
 ```
 
-This starts the bridge plus a local Mosquitto. Pointing an existing Home Assistant's MQTT
-integration at the same broker is all that's needed — entities appear automatically.
+This starts the bridge plus a local Mosquitto. Point any MQTT-native platform (for example
+Home Assistant's MQTT integration) at the same broker and the entities appear automatically.
 
 ## Kubernetes (Helm)
 
@@ -73,7 +80,7 @@ All configuration is via environment variables:
 | `MQTT_USERNAME` / `MQTT_PASSWORD` | — | optional |
 | `MQTT_TLS` | `false` | |
 | `BASE_TOPIC` | `ambient2mqtt` | |
-| `DISCOVERY_PREFIX` | `homeassistant` | must match HA's MQTT discovery prefix |
+| `DISCOVERY_PREFIX` | `homeassistant` | discovery topic prefix; must match your MQTT platform's |
 | `SYNC_INTERVAL` | `30` | seconds between polls |
 | `LOG_LEVEL` | `INFO` | |
 | `DEVICE_OVERRIDES` | `{}` | JSON map of `deviceId → entity type` to re-type a device (see below) |
@@ -87,9 +94,9 @@ them with `DEVICE_OVERRIDES`, a JSON object of `deviceId` → `"fan"` / `"switch
 DEVICE_OVERRIDES={"<device-uuid-a>":"fan","<device-uuid-b>":"fan"}
 ```
 
-The device UUIDs are the `ambient_<uuid>` unique IDs shown in Home Assistant (or in the
-bridge's discovery logs). A dimmer re-typed to `fan` exposes its level as fan speed; an
-on/off switch becomes a simple on/off fan.
+The device UUIDs are the `ambient_<uuid>` unique IDs surfaced by your MQTT platform (e.g.
+Home Assistant) or printed in the bridge's discovery logs. A dimmer re-typed to `fan` exposes
+its level as fan speed; an on/off switch becomes a simple on/off fan.
 
 ## Development
 

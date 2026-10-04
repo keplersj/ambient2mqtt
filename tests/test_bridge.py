@@ -50,7 +50,7 @@ THERMOSTAT = {
 }
 HUB = {"deviceId": "dev-hub", "traits": {"infoV1": {"model": "hub", "name": "Level Hub"}}}
 
-SPACES = {"space-1": "B210"}
+SPACES = {"space-1": "D42"}
 DISCOVERY_KW = {
     "base": "ambient2mqtt",
     "discovery_prefix": "homeassistant",
@@ -93,7 +93,7 @@ def test_discovery_dimmer_is_json_light_with_brightness():
     # clean single name: use device name, not a duplicated entity name
     assert cfg["name"] is None
     assert cfg["has_entity_name"] is True
-    assert cfg["device"]["suggested_area"] == "B210"
+    assert cfg["device"]["suggested_area"] == "D42"
 
 
 def test_discovery_switch_has_no_brightness():
