@@ -42,11 +42,13 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           provenance: true
           sbom: true
-      - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
+      - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-name: ghcr.io/keplersj/ambient2mqtt
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
+          # Storage records need an org-owned repo and the artifact-metadata permission.
+          create-storage-record: false
 
   chart:
     runs-on: ubuntu-latest
