@@ -1,6 +1,6 @@
 [project]
 name = "ambient2mqtt"
-version = "0.4.0"
+version = "0.4.1"
 description = "Bridge Ambient Smart Home (Level) devices onto MQTT with autodiscovery (Home Assistant-compatible, Matter-ready)"
 readme = "README.md"
 requires-python = ">=3.11"
