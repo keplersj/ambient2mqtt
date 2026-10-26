@@ -1,0 +1,19 @@
+{{- if .Values.grafana.dashboard.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "ambient2mqtt.fullname" . }}-dashboard
+  {{- with .Values.grafana.dashboard.namespace }}
+  namespace: {{ . }}
+  {{- end }}
+  labels:
+    {{- include "ambient2mqtt.labels" . | nindent 4 }}
+    {{- toYaml .Values.grafana.dashboard.labels | nindent 4 }}
+  {{- with .Values.grafana.dashboard.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+data:
+  ambient2mqtt.json: |-
+{{ .Files.Get "dashboards/ambient2mqtt.json" | indent 4 }}
+{{- end }}

@@ -17,7 +17,7 @@ import time
 
 import paho.mqtt.client as mqtt
 
-from . import metrics
+from . import metrics, tracing
 from .client import AmbientClient
 from .config import Settings
 
@@ -490,12 +490,24 @@ class Bridge:
         asyncio.run_coroutine_threadsafe(self._handle_command(msg.topic, payload), self._loop)
 
     async def _handle_command(self, topic: str, payload: str) -> None:
+        # One trace per command: the Ambient RPC (httpx span) and the settle re-polls nest here.
+        with tracing.span(
+            "ambient2mqtt.command",
+            kind="consumer",
+            **{"messaging.system": "mqtt", "messaging.destination.name": topic},
+        ):
+            await self._run_command(topic, payload)
+
+    async def _run_command(self, topic: str, payload: str) -> None:
         parts = topic[len(self.s.base_topic) + 1 :].split("/")
         device_id = parts[0]
         sub = "/".join(parts[1:])
         dev = self._devices.get(device_id, {})
         kind = command_kind(sub, dev.get("traits", {}))
         fields = {"device_id": device_id, "kind": kind}
+        tracing.set_attributes(
+            **{"ambient2mqtt.device_id": device_id, "ambient2mqtt.command.kind": kind}
+        )
         if kind == "unhandled":
             log.warning("Unhandled command topic %s", topic, extra=fields)
             metrics.COMMANDS.labels(kind, "unhandled").inc()
@@ -506,6 +518,7 @@ class Bridge:
             accepted = await self._dispatch(kind, device_id, payload, dev.get("traits", {}))
         except Exception as e:  # noqa: BLE001
             metrics.COMMANDS.labels(kind, "error").inc()
+            tracing.record_error(e)
             log.exception("command failed: %s", e, extra={**fields, "result": "error"})
             return
         if not accepted:
@@ -513,7 +526,7 @@ class Bridge:
             return
         elapsed = time.monotonic() - start
         metrics.COMMANDS.labels(kind, "success").inc()
-        metrics.COMMAND_DURATION.labels(kind).observe(elapsed)
+        metrics.COMMAND_DURATION.labels(kind).observe(elapsed, exemplar=tracing.exemplar())
         log.info(
             "command %s sent to %s in %.2fs",
             kind,
@@ -569,6 +582,15 @@ class Bridge:
     async def _settle(self, device_id: str, before: dict, start: float) -> None:
         """Re-poll after a command, timing how long the device takes to report a change."""
         dtype = device_type(self._devices.get(device_id, {}))
+        with tracing.span("ambient2mqtt.settle", **{"ambient2mqtt.device.type": dtype}):
+            converged = await self._await_convergence(device_id, dtype, before, start)
+            tracing.set_attributes(**{"ambient2mqtt.state.changed": converged})
+        if not converged:
+            metrics.STATE_UNCHANGED.labels(dtype).inc()
+
+    async def _await_convergence(
+        self, device_id: str, dtype: str, before: dict, start: float
+    ) -> bool:
         converged = False
         for delay in self._SETTLE_DELAYS:
             await asyncio.sleep(delay)
@@ -580,17 +602,23 @@ class Bridge:
             if not converged and _primary_state(self._devices.get(device_id)) != before:
                 converged = True
                 elapsed = time.monotonic() - start
-                metrics.STATE_CONVERGENCE.labels(dtype).observe(elapsed)
+                metrics.STATE_CONVERGENCE.labels(dtype).observe(
+                    elapsed, exemplar=tracing.exemplar()
+                )
+                tracing.add_event("state.changed", elapsed_s=elapsed)
                 log.info(
                     "%s reported new state after %.1fs",
                     device_id,
                     elapsed,
                     extra={"device_id": device_id, "type": dtype, "convergence_s": elapsed},
                 )
-        if not converged:
-            metrics.STATE_UNCHANGED.labels(dtype).inc()
+        return converged
 
     async def refresh(self, *, discovery: bool = True) -> None:
+        with tracing.span("ambient2mqtt.sync", **{"ambient2mqtt.sync.discovery": discovery}):
+            await self._refresh(discovery=discovery)
+
+    async def _refresh(self, *, discovery: bool) -> None:
         start = time.monotonic()
         try:
             world = await self.client.get_world()

@@ -145,12 +145,66 @@ Operator CRDs (kube-prometheus-stack, or Grafana Alloy's
 context such as `device_id`, `kind`, `result`, `duration_s`), ready for Loki via Grafana
 Alloy or Promtail.
 
+### Tracing (OpenTelemetry, optional)
+
+Tracing is off unless an OTLP endpoint is configured with the standard OpenTelemetry
+environment variables; the container image already includes the SDK (for a pip/uv
+install, add the `otel` extra: `ambient2mqtt[otel]`).
+
+```bash
+OTEL_EXPORTER_OTLP_ENDPOINT=http://alloy:4318   # OTLP/HTTP (Alloy, an OTel Collector, Tempo...)
+# OTEL_SERVICE_NAME=ambient2mqtt                # default
+# OTEL_TRACES_SAMPLER=parentbased_traceidratio  # keep 10% of traces (commands included)
+# OTEL_TRACES_SAMPLER_ARG=0.1
+```
+
+Each MQTT command is one trace: `ambient2mqtt.command` → the Ambient RPC (an httpx span) →
+`ambient2mqtt.settle`, whose child `ambient2mqtt.sync` spans are the re-polls; a
+`state.changed` event marks when the device reported the result. The command span stays
+open for the whole ~80s settle window. Background syncs are their own small traces.
+
+With tracing on, JSON logs carry `trace_id` / `span_id`, and the latency histograms carry
+exemplars (served when the scraper asks for OpenMetrics; Prometheus needs
+`--enable-feature=exemplar-storage`), so Grafana can jump from a slow point on a graph
+to its trace in Tempo.
+
+### Grafana
+
+- **Dashboard:** [`charts/ambient2mqtt/dashboards/ambient2mqtt.json`](charts/ambient2mqtt/dashboards/ambient2mqtt.json)
+  (import it, or set `grafana.dashboard.enabled=true` to ship it as a ConfigMap for the
+  Grafana sidecar). It covers bridge/MQTT status, sync health, Ambient API rate and latency,
+  commands, and how long devices take to report a command's result.
+- **Alerts:** `prometheusRule.enabled=true` adds a `PrometheusRule` with
+  `Ambient2mqttDown`, `Ambient2mqttSyncStale`, `Ambient2mqttMqttDisconnected`,
+  `Ambient2mqttLoginFailing` and `Ambient2mqttCommandsFailing`.
+- **Collection with Grafana Alloy:** scrape the Service (or let
+  `prometheus.operator.servicemonitors` pick up the ServiceMonitor) and `remote_write` to
+  Mimir / Prometheus / Grafana Cloud; send traces to Alloy's `otelcol.receiver.otlp` and on
+  to Tempo; pick up JSON logs with `loki.source.kubernetes`.
+
+```yaml
+# values.yaml for a kube-prometheus-stack / Grafana-sidecar cluster
+metrics:
+  serviceMonitor:
+    enabled: true
+prometheusRule:
+  enabled: true
+grafana:
+  dashboard:
+    enabled: true
+bridge:
+  logFormat: json
+extraEnv:
+  - name: OTEL_EXPORTER_OTLP_ENDPOINT
+    value: http://alloy.monitoring:4318
+```
+
 ## Development
 
 Uses the [uv](https://docs.astral.sh/uv/) stack:
 
 ```bash
-uv sync
+uv sync --all-extras   # include the optional OpenTelemetry extra
 uv run ruff check . && uv run ruff format --check .
 uv run ty check          # type check (pre-1.0; advisory for now)
 uv run pytest

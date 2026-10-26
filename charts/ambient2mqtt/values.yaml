@@ -46,6 +46,29 @@ metrics:
     scrapeTimeout: 10s
     labels: {}
 
+# Alerts for the Prometheus Operator: bridge down, sync stale, MQTT disconnected,
+# login failures, failing commands. Needs serviceMonitor (or another scrape config that
+# sets job=<release fullname>).
+prometheusRule:
+  enabled: false
+  labels: {}
+  for: 5m
+  syncStaleSeconds: 300
+  additionalRules: []
+
+# Grafana dashboard as a ConfigMap, for the Grafana sidecar (kube-prometheus-stack and the
+# grafana chart watch for the grafana_dashboard label). The JSON is also usable standalone:
+# charts/ambient2mqtt/dashboards/ambient2mqtt.json
+grafana:
+  dashboard:
+    enabled: false
+    # Defaults to the release namespace; set it if your sidecar only watches one namespace.
+    namespace: ""
+    labels:
+      grafana_dashboard: "1"
+    # e.g. grafana_folder: Home
+    annotations: {}
+
 livenessProbe:
   httpGet:
     path: /healthz

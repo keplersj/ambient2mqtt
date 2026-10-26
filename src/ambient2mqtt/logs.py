@@ -6,6 +6,8 @@ import json
 import logging
 from datetime import UTC, datetime
 
+from . import tracing
+
 TEXT_FORMAT = "%(asctime)s %(levelname)s %(name)s %(message)s"
 
 # Attributes every LogRecord has; anything else on a record came from `extra=` and is
@@ -24,6 +26,9 @@ class JsonFormatter(logging.Formatter):
         for key, value in record.__dict__.items():
             if key not in _STANDARD and not key.startswith("_"):
                 out[key] = value
+        ids = tracing.current_ids()
+        if ids:
+            out["trace_id"], out["span_id"] = ids
         if record.exc_info:
             out["exc"] = self.formatException(record.exc_info)
         return json.dumps(out, default=str)

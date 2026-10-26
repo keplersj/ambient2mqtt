@@ -29,6 +29,13 @@ Issues = "https://github.com/keplersj/ambient2mqtt/issues"
 [project.scripts]
 ambient2mqtt = "ambient2mqtt.__main__:main"
 
+[project.optional-dependencies]
+otel = [
+    "opentelemetry-exporter-otlp-proto-http>=1.30",
+    "opentelemetry-instrumentation-httpx>=0.51b0",
+    "opentelemetry-sdk>=1.30",
+]
+
 [build-system]
 requires = ["uv_build>=0.13,<0.14"]
 build-backend = "uv_build"

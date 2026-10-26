@@ -1,0 +1,58 @@
+{{- if and .Values.metrics.enabled .Values.prometheusRule.enabled }}
+{{- $selector := printf "job=%q,namespace=%q" (include "ambient2mqtt.fullname" .) .Release.Namespace }}
+{{- $for := .Values.prometheusRule.for }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "ambient2mqtt.fullname" . }}
+  labels:
+    {{- include "ambient2mqtt.labels" . | nindent 4 }}
+    {{- with .Values.prometheusRule.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: ambient2mqtt
+      rules:
+        - alert: Ambient2mqttDown
+          expr: up{ {{- $selector -}} } == 0 or absent(up{ {{- $selector -}} })
+          for: {{ $for }}
+          labels:
+            severity: critical
+          annotations:
+            summary: ambient2mqtt is down
+            description: Prometheus cannot scrape ambient2mqtt in {{ .Release.Namespace }}; device state and commands are not being bridged.
+        - alert: Ambient2mqttSyncStale
+          expr: time() - max(ambient2mqtt_last_successful_sync_timestamp_seconds{ {{- $selector -}} }) > {{ .Values.prometheusRule.syncStaleSeconds }}
+          for: {{ $for }}
+          labels:
+            severity: warning
+          annotations:
+            summary: ambient2mqtt has not synced device state
+            description: {{ printf "No successful sync from the Ambient cloud for {{ $value | humanizeDuration }}. Check the logs for login or API errors." | quote }}
+        - alert: Ambient2mqttMqttDisconnected
+          expr: max(ambient2mqtt_mqtt_connected{ {{- $selector -}} }) == 0
+          for: {{ $for }}
+          labels:
+            severity: warning
+          annotations:
+            summary: ambient2mqtt is disconnected from the MQTT broker
+            description: The bridge cannot publish state or receive commands until it reconnects to {{ .Values.mqtt.host }}:{{ .Values.mqtt.port }}.
+        - alert: Ambient2mqttLoginFailing
+          expr: sum(increase(ambient2mqtt_logins_total{ {{- $selector -}} ,result="failure"}[15m])) >= 3
+          labels:
+            severity: warning
+          annotations:
+            summary: ambient2mqtt cannot log in to Ambient
+            description: Repeated Ambient login failures in the last 15 minutes; the credentials may have changed or the account may be locked.
+        - alert: Ambient2mqttCommandsFailing
+          expr: sum(increase(ambient2mqtt_commands_total{ {{- $selector -}} ,result="error"}[15m])) >= 2
+          labels:
+            severity: warning
+          annotations:
+            summary: ambient2mqtt commands are failing
+            description: {{ printf "{{ $value | printf \"%%.0f\" }} commands failed against the Ambient API in the last 15 minutes." | quote }}
+        {{- with .Values.prometheusRule.additionalRules }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+{{- end }}

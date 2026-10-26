@@ -20,7 +20,7 @@ jobs:
       - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
           enable-cache: true
-      - run: uv sync --frozen
+      - run: uv sync --frozen --all-extras
       - name: ruff lint
         run: uv run ruff check --output-format=github .
       - name: ruff format

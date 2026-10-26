@@ -8,6 +8,7 @@ import logging
 import signal
 import sys
 
+from . import __version__, tracing
 from .bridge import Bridge
 from .client import AmbientClient
 from .config import Settings
@@ -24,6 +25,7 @@ async def _run() -> int:
         log.error("AMBIENT_USERNAME / AMBIENT_PASSWORD must be set")
         return 1
 
+    tracing.setup(__version__)  # before AmbientClient, so its httpx client is instrumented
     client = AmbientClient(settings)
     bridge = Bridge(client, settings)
     health = HealthServer(settings.metrics_port, bridge.readiness)
@@ -44,6 +46,7 @@ async def _run() -> int:
     runner.cancel()
     await bridge.shutdown()
     await health.stop()
+    tracing.shutdown()
     if runner in done and runner.exception():
         log.error("bridge exited with error: %s", runner.exception())
         return 1

@@ -24,7 +24,7 @@ import time
 
 import httpx
 
-from . import metrics
+from . import metrics, tracing
 from .config import Settings
 
 log = logging.getLogger(__name__)
@@ -66,7 +66,9 @@ class AmbientClient:
             return r
         finally:
             metrics.API_REQUESTS.labels(name, status).inc()
-            metrics.API_LATENCY.labels(name).observe(time.perf_counter() - start)
+            metrics.API_LATENCY.labels(name).observe(
+                time.perf_counter() - start, exemplar=tracing.exemplar()
+            )
 
     async def login(self) -> None:
         try:
