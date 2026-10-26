@@ -13,9 +13,11 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 
 import paho.mqtt.client as mqtt
 
+from . import metrics
 from .client import AmbientClient
 from .config import Settings
 
@@ -91,6 +93,51 @@ _BINARY_PRIMARY = {
     "accessSensorReadV1": ("accessSensorState", "ACCESS_SENSOR_STATE_OPEN", "opening"),
     "binarySensorReadV1": ("binarySensorState", "BINARY_SENSOR_STATE_ON", None),
 }
+
+
+_BINARY_TYPES = {
+    "motionSensorReadV1": "motion",
+    "leakSensorReadV1": "leak",
+    "accessSensorReadV1": "contact",
+    "binarySensorReadV1": "binary_sensor",
+}
+
+# Diagnostic fields in the state payload; excluded when deciding whether a command took effect.
+_AUX_STATE_KEYS = {"battery", "connectivity", "firmware"}
+
+
+def device_type(dev: dict) -> str:
+    """Coarse device type from its read traits; a bounded value used as a metric label."""
+    traits = dev.get("traits", {})
+    if "lightReadV1" in traits:
+        return "light"
+    if "lockerReadV1" in traits:
+        return "lock"
+    if "thermostatReadV1" in traits:
+        return "thermostat"
+    for key, name in _BINARY_TYPES.items():
+        if key in traits:
+            return name
+    return "other"
+
+
+def _primary_state(dev: dict | None) -> dict:
+    state = build_state(dev) if dev else None
+    return {k: v for k, v in (state or {}).items() if k not in _AUX_STATE_KEYS}
+
+
+def command_kind(sub: str, traits: dict) -> str:
+    """Name a command topic suffix (bounded, for metric labels); 'unhandled' if unsupported."""
+    if sub == "set" and "lightReadV1" in traits:
+        return "light"
+    if sub == "set" and "lockerReadV1" in traits:
+        return "lock"
+    return {
+        "temp/set": "temperature",
+        "mode/set": "mode",
+        "fan/set": "fan_mode",
+        "percentage/set": "fan_speed",
+    }.get(sub, "unhandled")
 
 
 def build_state(dev: dict) -> dict | None:
@@ -345,6 +392,8 @@ class Bridge:
         self._connected = asyncio.Event()
         self._space_names: dict[str, str] = {}
         self._devices: dict[str, dict] = {}
+        self.mqtt_connected = False
+        self._last_sync: float | None = None  # time.monotonic() of the last successful sync
 
         try:
             self.mqtt = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1, client_id="ambient2mqtt")
@@ -369,6 +418,8 @@ class Bridge:
     def _on_connect(self, client, userdata, flags, rc):  # noqa: ANN001
         if rc == 0:
             log.info("MQTT connected")
+            self.mqtt_connected = True
+            metrics.MQTT_CONNECTED.set(1)
             # Republish on every (re)connect: a broker restart fires the LWT ("offline",
             # retained) and nothing else would flip it back.
             client.publish(self.avail_topic, "online", qos=1, retain=True)
@@ -384,6 +435,20 @@ class Bridge:
 
     def _on_disconnect(self, client, userdata, rc):  # noqa: ANN001
         log.warning("MQTT disconnected rc=%s", rc)
+        self.mqtt_connected = False
+        metrics.MQTT_CONNECTED.set(0)
+        metrics.MQTT_DISCONNECTS.inc()
+
+    def readiness(self) -> tuple[bool, str]:
+        """Ready while MQTT is connected and a sync succeeded within ~3 sync intervals."""
+        if not self.mqtt_connected:
+            return False, "mqtt disconnected"
+        if self._last_sync is None:
+            return False, "no successful sync yet"
+        age = time.monotonic() - self._last_sync
+        if age > max(3 * self.s.sync_interval, 90):
+            return False, f"last successful sync {age:.0f}s ago"
+        return True, "ok"
 
     def _publish_device(self, dev: dict, *, discovery: bool) -> None:
         if discovery:
@@ -397,6 +462,7 @@ class Bridge:
             ):
                 topic = f"{self.s.discovery_prefix}/{component}/{payload['unique_id']}/config"
                 self.mqtt.publish(topic, json.dumps(payload), qos=1, retain=True)
+                metrics.MQTT_PUBLISHES.labels("discovery").inc()
                 log.info(
                     "Discovery: %s -> %s (%s)",
                     _info(dev).get("name"),
@@ -411,6 +477,7 @@ class Bridge:
                 qos=1,
                 retain=True,
             )
+            metrics.MQTT_PUBLISHES.labels("state").inc()
 
     def _on_message(self, client, userdata, msg):  # noqa: ANN001
         if self._loop is None:
@@ -419,58 +486,79 @@ class Bridge:
             payload = msg.payload.decode()
         except Exception:
             payload = ""
-        log.info("CMD %s = %s", msg.topic, payload)
+        log.info("CMD %s = %s", msg.topic, payload, extra={"topic": msg.topic})
         asyncio.run_coroutine_threadsafe(self._handle_command(msg.topic, payload), self._loop)
 
     async def _handle_command(self, topic: str, payload: str) -> None:
+        parts = topic[len(self.s.base_topic) + 1 :].split("/")
+        device_id = parts[0]
+        sub = "/".join(parts[1:])
+        dev = self._devices.get(device_id, {})
+        kind = command_kind(sub, dev.get("traits", {}))
+        fields = {"device_id": device_id, "kind": kind}
+        if kind == "unhandled":
+            log.warning("Unhandled command topic %s", topic, extra=fields)
+            metrics.COMMANDS.labels(kind, "unhandled").inc()
+            return
+        before = _primary_state(dev)
+        start = time.monotonic()
         try:
-            parts = topic[len(self.s.base_topic) + 1 :].split("/")
-            device_id = parts[0]
-            sub = "/".join(parts[1:])
-            traits = self._devices.get(device_id, {}).get("traits", {})
-            if sub == "set" and "lightReadV1" in traits:
-                data = (
-                    json.loads(payload) if payload.strip().startswith("{") else {"state": payload}
-                )
-                on = str(data.get("state", "")).upper() == "ON"
-                await self.client.set_light(device_id, on, data.get("brightness"))
-            elif sub == "set" and "lockerReadV1" in traits:
-                await self.client.set_lock(device_id, payload.strip().upper() == "LOCK")
-            elif sub == "temp/set":
-                temp = float(payload)
-                st = traits.get("thermostatReadV1", {}).get("status", {})
-                mode = HVAC_TO_HA.get(st.get("hvacMode", ""), "cool")
-                if mode == "heat":
-                    await self.client.set_thermostat(device_id, heat_celsius=temp)
-                else:
-                    await self.client.set_thermostat(device_id, cool_celsius=temp)
-            elif sub == "mode/set":
-                system_mode = HA_TO_SYSTEM.get(payload.strip())
-                if system_mode:
-                    await self.client.set_thermostat_mode(device_id, system_mode)
-                else:
-                    log.warning("Unknown climate mode %r", payload)
-                    return
-            elif sub == "fan/set":
-                fan_mode = HA_TO_FAN.get(payload.strip())
-                if fan_mode:
-                    await self.client.set_fan_mode(device_id, fan_mode)
-                else:
-                    log.warning("Unknown fan mode %r", payload)
-                    return
-            elif sub == "percentage/set":
-                # fan-override speed -> dimmer level on the underlying light-capable switch
-                pct = int(payload)
-                if pct <= 0:
-                    await self.client.set_light(device_id, on=False)
-                else:
-                    await self.client.set_light(device_id, on=True, brightness=pct)
-            else:
-                log.warning("Unhandled command topic %s", topic)
-                return
-            await self._settle()
+            accepted = await self._dispatch(kind, device_id, payload, dev.get("traits", {}))
         except Exception as e:  # noqa: BLE001
-            log.exception("command failed: %s", e)
+            metrics.COMMANDS.labels(kind, "error").inc()
+            log.exception("command failed: %s", e, extra={**fields, "result": "error"})
+            return
+        if not accepted:
+            metrics.COMMANDS.labels(kind, "rejected").inc()
+            return
+        elapsed = time.monotonic() - start
+        metrics.COMMANDS.labels(kind, "success").inc()
+        metrics.COMMAND_DURATION.labels(kind).observe(elapsed)
+        log.info(
+            "command %s sent to %s in %.2fs",
+            kind,
+            device_id,
+            elapsed,
+            extra={**fields, "result": "success", "duration_s": round(elapsed, 3)},
+        )
+        await self._settle(device_id, before, start)
+
+    async def _dispatch(self, kind: str, device_id: str, payload: str, traits: dict) -> bool:
+        """Send one command to Ambient. Returns False if the payload was rejected."""
+        if kind == "light":
+            data = json.loads(payload) if payload.strip().startswith("{") else {"state": payload}
+            on = str(data.get("state", "")).upper() == "ON"
+            await self.client.set_light(device_id, on, data.get("brightness"))
+        elif kind == "lock":
+            await self.client.set_lock(device_id, payload.strip().upper() == "LOCK")
+        elif kind == "temperature":
+            temp = float(payload)
+            st = traits.get("thermostatReadV1", {}).get("status", {})
+            mode = HVAC_TO_HA.get(st.get("hvacMode", ""), "cool")
+            if mode == "heat":
+                await self.client.set_thermostat(device_id, heat_celsius=temp)
+            else:
+                await self.client.set_thermostat(device_id, cool_celsius=temp)
+        elif kind == "mode":
+            system_mode = HA_TO_SYSTEM.get(payload.strip())
+            if not system_mode:
+                log.warning("Unknown climate mode %r", payload, extra={"device_id": device_id})
+                return False
+            await self.client.set_thermostat_mode(device_id, system_mode)
+        elif kind == "fan_mode":
+            fan_mode = HA_TO_FAN.get(payload.strip())
+            if not fan_mode:
+                log.warning("Unknown fan mode %r", payload, extra={"device_id": device_id})
+                return False
+            await self.client.set_fan_mode(device_id, fan_mode)
+        elif kind == "fan_speed":
+            # fan-override speed -> dimmer level on the underlying light-capable switch
+            pct = int(payload)
+            if pct <= 0:
+                await self.client.set_light(device_id, on=False)
+            else:
+                await self.client.set_light(device_id, on=True, brightness=pct)
+        return True
 
     # Re-publish state as the device reports the result of a command. Lights reflect
     # almost instantly, but some devices (notably the lock) only report their new
@@ -478,20 +566,51 @@ class Bridge:
     # full sync. Delays are cumulative (~2s, 12s, 37s, 82s after the command).
     _SETTLE_DELAYS = (2, 10, 25, 45)
 
-    async def _settle(self) -> None:
+    async def _settle(self, device_id: str, before: dict, start: float) -> None:
+        """Re-poll after a command, timing how long the device takes to report a change."""
+        dtype = device_type(self._devices.get(device_id, {}))
+        converged = False
         for delay in self._SETTLE_DELAYS:
             await asyncio.sleep(delay)
             try:
                 await self.refresh(discovery=False)
             except Exception as e:  # noqa: BLE001
                 log.error("settle refresh error: %s", e)
+                continue
+            if not converged and _primary_state(self._devices.get(device_id)) != before:
+                converged = True
+                elapsed = time.monotonic() - start
+                metrics.STATE_CONVERGENCE.labels(dtype).observe(elapsed)
+                log.info(
+                    "%s reported new state after %.1fs",
+                    device_id,
+                    elapsed,
+                    extra={"device_id": device_id, "type": dtype, "convergence_s": elapsed},
+                )
+        if not converged:
+            metrics.STATE_UNCHANGED.labels(dtype).inc()
 
     async def refresh(self, *, discovery: bool = True) -> None:
-        world = await self.client.get_world()
-        self._space_names = {s["spaceId"]: s.get("name", "") for s in world.get("spaces", [])}
-        self._devices = {d["deviceId"]: d for d in world.get("devices", [])}
+        start = time.monotonic()
+        try:
+            world = await self.client.get_world()
+            self._space_names = {s["spaceId"]: s.get("name", "") for s in world.get("spaces", [])}
+            self._devices = {d["deviceId"]: d for d in world.get("devices", [])}
+            for dev in self._devices.values():
+                self._publish_device(dev, discovery=discovery)
+        except Exception:
+            metrics.SYNCS.labels("error").inc()
+            raise
+        metrics.SYNCS.labels("success").inc()
+        metrics.SYNC_DURATION.observe(time.monotonic() - start)
+        metrics.LAST_SYNC.set(time.time())
+        self._last_sync = time.monotonic()
+        counts: dict[str, int] = {}
         for dev in self._devices.values():
-            self._publish_device(dev, discovery=discovery)
+            counts[device_type(dev)] = counts.get(device_type(dev), 0) + 1
+        metrics.DEVICES.clear()
+        for dtype, n in counts.items():
+            metrics.DEVICES.labels(dtype).set(n)
 
     async def run(self) -> None:
         await self.client.login()
@@ -510,6 +629,7 @@ class Bridge:
     async def shutdown(self) -> None:
         try:
             self.mqtt.publish(self.avail_topic, "offline", qos=1, retain=True)
+            metrics.MQTT_CONNECTED.set(0)
             self.mqtt.loop_stop()
             self.mqtt.disconnect()
         finally:

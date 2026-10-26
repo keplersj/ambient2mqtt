@@ -46,6 +46,27 @@ spec:
               value: {{ .Values.bridge.logLevel | quote }}
             - name: DEVICE_OVERRIDES
               value: {{ .Values.bridge.deviceOverrides | toJson | quote }}
+            - name: LOG_FORMAT
+              value: {{ .Values.bridge.logFormat | quote }}
+            - name: METRICS_PORT
+              value: {{ ternary .Values.metrics.port 0 .Values.metrics.enabled | quote }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- if .Values.metrics.enabled }}
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.metrics.port }}
+              protocol: TCP
+          {{- with .Values.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
       {{- with .Values.nodeSelector }}

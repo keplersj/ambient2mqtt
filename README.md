@@ -83,6 +83,8 @@ All configuration is via environment variables:
 | `DISCOVERY_PREFIX` | `homeassistant` | discovery topic prefix; must match your MQTT platform's |
 | `SYNC_INTERVAL` | `30` | seconds between polls |
 | `LOG_LEVEL` | `INFO` | |
+| `LOG_FORMAT` | `text` | `json` for one JSON object per line (see [Observability](#observability)) |
+| `METRICS_PORT` | `9100` | serves `/metrics`, `/healthz`, `/readyz`; `0` disables |
 | `DEVICE_OVERRIDES` | `{}` | JSON map of `deviceId → entity type` to re-type a device (see below) |
 
 ### Device type overrides
@@ -97,6 +99,51 @@ DEVICE_OVERRIDES={"<device-uuid-a>":"fan","<device-uuid-b>":"fan"}
 The device UUIDs are the `ambient_<uuid>` unique IDs surfaced by your MQTT platform (e.g.
 Home Assistant) or printed in the bridge's discovery logs. A dimmer re-typed to `fan` exposes
 its level as fan speed; an on/off switch becomes a simple on/off fan.
+
+## Observability
+
+The bridge serves three endpoints on `METRICS_PORT` (default `9100`):
+
+| Path | Purpose |
+|---|---|
+| `/metrics` | Prometheus metrics (OpenMetrics when the scraper asks for it) |
+| `/healthz` | liveness: the event loop is responsive |
+| `/readyz` | readiness: MQTT is connected **and** a sync succeeded within ~3 sync intervals; otherwise `503` with the reason |
+
+`/readyz` is what catches a bridge that is still running but no longer working (expired
+credentials, Ambient API errors, broker gone). The Helm chart wires it to the pod's
+readiness probe, and the Compose file uses it as the container healthcheck.
+
+### Metrics
+
+All metrics are prefixed `ambient2mqtt_`. Highlights:
+
+| Metric | What it tells you |
+|---|---|
+| `last_successful_sync_timestamp_seconds` | alert on `time() - … > 300`: the bridge has stopped tracking your devices |
+| `syncs_total{result}`, `sync_duration_seconds` | sync health and latency |
+| `api_requests_total{method,status}`, `api_request_duration_seconds{method}` | every Ambient cloud call, by RPC method |
+| `logins_total{result}`, `token_expiry_timestamp_seconds` | authentication |
+| `mqtt_connected`, `mqtt_disconnects_total`, `mqtt_publishes_total{kind}` | broker connectivity |
+| `commands_total{kind,result}`, `command_duration_seconds{kind}` | commands from MQTT (`result`: success / error / rejected / unhandled) |
+| `state_convergence_seconds{type}` | how long a device takes to *report* the result of a command (e.g. the lock's ~30–40s lag) |
+| `state_unchanged_after_command_total{type}` | commands whose effect never showed up within ~80s (no-op, or stale upstream state) |
+| `devices{type}`, `build_info{version}` | inventory |
+
+Standard `process_*` / `python_*` metrics (memory, CPU, GC) are included too.
+
+**Kubernetes:** set `metrics.serviceMonitor.enabled=true` if you run the Prometheus
+Operator CRDs (kube-prometheus-stack, or Grafana Alloy's
+`prometheus.operator.servicemonitors`). Otherwise point any scraper at the
+`<release>-ambient2mqtt` Service on port `metrics`.
+
+**Docker Compose:** port `9100` is published; add a scrape job for `<host>:9100`.
+
+### Logs
+
+`LOG_FORMAT=json` writes one JSON object per line (`ts`, `level`, `logger`, `msg`, plus
+context such as `device_id`, `kind`, `result`, `duration_s`), ready for Loki via Grafana
+Alloy or Promtail.
 
 ## Development
 

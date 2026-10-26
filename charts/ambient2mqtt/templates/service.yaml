@@ -1,0 +1,23 @@
+{{- if .Values.metrics.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "ambient2mqtt.fullname" . }}
+  labels:
+    {{- include "ambient2mqtt.labels" . | nindent 4 }}
+  {{- with .Values.metrics.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: ClusterIP
+  # Metrics-only Service: keep scraping a bridge that is failing readiness.
+  publishNotReadyAddresses: true
+  selector:
+    {{- include "ambient2mqtt.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: metrics
+      port: {{ .Values.metrics.port }}
+      targetPort: metrics
+      protocol: TCP
+{{- end }}

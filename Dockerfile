@@ -31,4 +31,7 @@ COPY --from=build /app/src /app/src
 RUN useradd --system --uid 1000 --create-home ambient2mqtt
 USER 1000:1000
 
+# /metrics, /healthz, /readyz (METRICS_PORT)
+EXPOSE 9100
+
 ENTRYPOINT ["ambient2mqtt"]

@@ -24,6 +24,7 @@ import time
 
 import httpx
 
+from . import metrics
 from .config import Settings
 
 log = logging.getLogger(__name__)
@@ -55,8 +56,31 @@ class AmbientClient:
     async def aclose(self) -> None:
         await self._http.aclose()
 
+    async def _post(self, name: str, url: str, **kwargs) -> httpx.Response:
+        """POST, recording request count by status and latency under the API method `name`."""
+        start = time.perf_counter()
+        status = "error"
+        try:
+            r = await self._http.post(url, **kwargs)
+            status = str(r.status_code)
+            return r
+        finally:
+            metrics.API_REQUESTS.labels(name, status).inc()
+            metrics.API_LATENCY.labels(name).observe(time.perf_counter() - start)
+
     async def login(self) -> None:
-        r = await self._http.post(
+        try:
+            await self._login()
+        except Exception:
+            metrics.LOGINS.labels("failure").inc()
+            raise
+        metrics.LOGINS.labels("success").inc()
+        if self._exp:
+            metrics.TOKEN_EXPIRY.set(self._exp)
+
+    async def _login(self) -> None:
+        r = await self._post(
+            "login",
             f"{self._s.auth_url}/mdu-auth/v2/auth/login",
             json={
                 "username": self._s.username,
@@ -88,10 +112,10 @@ class AmbientClient:
     async def _rpc(self, method: str, body: dict) -> dict:
         await self._ensure_token()
         url = f"{self._s.device_url}/device.discovery.v1.{method}"
-        r = await self._http.post(url, json=body, headers=self._headers())
+        r = await self._post(method, url, json=body, headers=self._headers())
         if r.status_code == 403:
             await self.login()
-            r = await self._http.post(url, json=body, headers=self._headers())
+            r = await self._post(method, url, json=body, headers=self._headers())
         if r.status_code != 200:
             raise AmbientError(f"{method} failed: {r.status_code} {r.text[:200]}")
         return r.json() if r.content else {}

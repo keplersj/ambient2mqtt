@@ -25,9 +25,46 @@ bridge:
   discoveryPrefix: homeassistant
   syncInterval: 30
   logLevel: INFO
+  # "text" or "json" (one JSON object per line; easier to query in Loki).
+  logFormat: text
   # Re-type devices Ambient misreports, e.g. a switch driving a fan.
   # Map of deviceId -> "fan" | "switch" | "light".
   deviceOverrides: {}
+
+# Prometheus /metrics plus /healthz and /readyz, all on one port. Disabling this also
+# removes the probes, since they share the endpoint.
+metrics:
+  enabled: true
+  port: 9100
+  service:
+    annotations: {}
+  # Requires the Prometheus Operator CRDs (kube-prometheus-stack, or Grafana Alloy's
+  # prometheus.operator.servicemonitors component).
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    scrapeTimeout: 10s
+    labels: {}
+
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: metrics
+  periodSeconds: 30
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+# Not ready until MQTT is connected and a sync succeeded within ~3 sync intervals.
+readinessProbe:
+  httpGet:
+    path: /readyz
+    port: metrics
+  periodSeconds: 15
+  timeoutSeconds: 5
+  failureThreshold: 2
+
+# Extra container env, e.g. OTEL_* settings.
+extraEnv: []
 
 replicaCount: 1
 
