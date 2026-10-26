@@ -4,8 +4,8 @@ description: >-
   Bridge Ambient Smart Home (Level) devices to MQTT with Home Assistant
   autodiscovery
 type: application
-version: 0.4.1
-appVersion: 0.4.1
+version: 0.5.0
+appVersion: 0.5.0
 home: https://github.com/keplersj/ambient2mqtt
 sources:
   - https://github.com/keplersj/ambient2mqtt

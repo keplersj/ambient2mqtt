@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.5.0](https://github.com/keplersj/ambient2mqtt/compare/v0.4.1...v0.5.0) (2026-10-26)
+
+
+### Features
+
+* observability — Prometheus metrics, health probes, JSON logs, optional OTel tracing, Grafana dashboard & alerts ([dafd29d](https://github.com/keplersj/ambient2mqtt/commit/dafd29d9257ea02749bc1c36e9ced3ba29bf6c71))
+* optional OpenTelemetry tracing, Grafana dashboard and alert rules ([bab5981](https://github.com/keplersj/ambient2mqtt/commit/bab5981dc2962105a3efe7306fd315a9d1a5daba))
+* Prometheus metrics, health/readiness endpoints and JSON logs ([c0b9269](https://github.com/keplersj/ambient2mqtt/commit/c0b9269c43cf4787e31d75d5ff25ba8b9cf30e7f))
+
 ## [0.4.1](https://github.com/keplersj/ambient2mqtt/compare/v0.4.0...v0.4.1) (2026-10-26)
 
 
