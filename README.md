@@ -83,6 +83,8 @@ All configuration is via environment variables:
 | `DISCOVERY_PREFIX` | `homeassistant` | discovery topic prefix; must match your MQTT platform's |
 | `SYNC_INTERVAL` | `30` | seconds between polls |
 | `LOG_LEVEL` | `INFO` | |
+| `LOG_FORMAT` | `text` | `json` for one JSON object per line (see [Observability](#observability)) |
+| `METRICS_PORT` | `9100` | serves `/metrics`, `/healthz`, `/readyz`; `0` disables |
 | `DEVICE_OVERRIDES` | `{}` | JSON map of `deviceId → entity type` to re-type a device (see below) |
 
 ### Device type overrides
@@ -98,12 +100,111 @@ The device UUIDs are the `ambient_<uuid>` unique IDs surfaced by your MQTT platf
 Home Assistant) or printed in the bridge's discovery logs. A dimmer re-typed to `fan` exposes
 its level as fan speed; an on/off switch becomes a simple on/off fan.
 
+## Observability
+
+The bridge serves three endpoints on `METRICS_PORT` (default `9100`):
+
+| Path | Purpose |
+|---|---|
+| `/metrics` | Prometheus metrics (OpenMetrics when the scraper asks for it) |
+| `/healthz` | liveness: the event loop is responsive |
+| `/readyz` | readiness: MQTT is connected **and** a sync succeeded within ~3 sync intervals; otherwise `503` with the reason |
+
+`/readyz` is what catches a bridge that is still running but no longer working (expired
+credentials, Ambient API errors, broker gone). The Helm chart wires it to the pod's
+readiness probe, and the Compose file uses it as the container healthcheck.
+
+### Metrics
+
+All metrics are prefixed `ambient2mqtt_`. Highlights:
+
+| Metric | What it tells you |
+|---|---|
+| `last_successful_sync_timestamp_seconds` | alert on `time() - … > 300`: the bridge has stopped tracking your devices |
+| `syncs_total{result}`, `sync_duration_seconds` | sync health and latency |
+| `api_requests_total{method,status}`, `api_request_duration_seconds{method}` | every Ambient cloud call, by RPC method |
+| `logins_total{result}`, `token_expiry_timestamp_seconds` | authentication |
+| `mqtt_connected`, `mqtt_disconnects_total`, `mqtt_publishes_total{kind}` | broker connectivity |
+| `commands_total{kind,result}`, `command_duration_seconds{kind}` | commands from MQTT (`result`: success / error / rejected / unhandled) |
+| `state_convergence_seconds{type}` | how long a device takes to *report* the result of a command (e.g. the lock's ~30–40s lag) |
+| `state_unchanged_after_command_total{type}` | commands whose effect never showed up within ~80s (no-op, or stale upstream state) |
+| `devices{type}`, `build_info{version}` | inventory |
+
+Standard `process_*` / `python_*` metrics (memory, CPU, GC) are included too.
+
+**Kubernetes:** set `metrics.serviceMonitor.enabled=true` if you run the Prometheus
+Operator CRDs (kube-prometheus-stack, or Grafana Alloy's
+`prometheus.operator.servicemonitors`). Otherwise point any scraper at the
+`<release>-ambient2mqtt` Service on port `metrics`.
+
+**Docker Compose:** port `9100` is published; add a scrape job for `<host>:9100`.
+
+### Logs
+
+`LOG_FORMAT=json` writes one JSON object per line (`ts`, `level`, `logger`, `msg`, plus
+context such as `device_id`, `kind`, `result`, `duration_s`), ready for Loki via Grafana
+Alloy or Promtail.
+
+### Tracing (OpenTelemetry, optional)
+
+Tracing is off unless an OTLP endpoint is configured with the standard OpenTelemetry
+environment variables; the container image already includes the SDK (for a pip/uv
+install, add the `otel` extra: `ambient2mqtt[otel]`).
+
+```bash
+OTEL_EXPORTER_OTLP_ENDPOINT=http://alloy:4318   # OTLP/HTTP (Alloy, an OTel Collector, Tempo...)
+# OTEL_SERVICE_NAME=ambient2mqtt                # default
+# OTEL_TRACES_SAMPLER=parentbased_traceidratio  # keep 10% of traces (commands included)
+# OTEL_TRACES_SAMPLER_ARG=0.1
+```
+
+Each MQTT command is one trace: `ambient2mqtt.command` → the Ambient RPC (an httpx span) →
+`ambient2mqtt.settle`, whose child `ambient2mqtt.sync` spans are the re-polls; a
+`state.changed` event marks when the device reported the result. The command span stays
+open for the whole ~80s settle window. Background syncs are their own small traces.
+
+With tracing on, JSON logs carry `trace_id` / `span_id`, and the latency histograms carry
+exemplars (served when the scraper asks for OpenMetrics; Prometheus needs
+`--enable-feature=exemplar-storage`), so Grafana can jump from a slow point on a graph
+to its trace in Tempo.
+
+### Grafana
+
+- **Dashboard:** [`charts/ambient2mqtt/dashboards/ambient2mqtt.json`](charts/ambient2mqtt/dashboards/ambient2mqtt.json)
+  (import it, or set `grafana.dashboard.enabled=true` to ship it as a ConfigMap for the
+  Grafana sidecar). It covers bridge/MQTT status, sync health, Ambient API rate and latency,
+  commands, and how long devices take to report a command's result.
+- **Alerts:** `prometheusRule.enabled=true` adds a `PrometheusRule` with
+  `Ambient2mqttDown`, `Ambient2mqttSyncStale`, `Ambient2mqttMqttDisconnected`,
+  `Ambient2mqttLoginFailing` and `Ambient2mqttCommandsFailing`.
+- **Collection with Grafana Alloy:** scrape the Service (or let
+  `prometheus.operator.servicemonitors` pick up the ServiceMonitor) and `remote_write` to
+  Mimir / Prometheus / Grafana Cloud; send traces to Alloy's `otelcol.receiver.otlp` and on
+  to Tempo; pick up JSON logs with `loki.source.kubernetes`.
+
+```yaml
+# values.yaml for a kube-prometheus-stack / Grafana-sidecar cluster
+metrics:
+  serviceMonitor:
+    enabled: true
+prometheusRule:
+  enabled: true
+grafana:
+  dashboard:
+    enabled: true
+bridge:
+  logFormat: json
+extraEnv:
+  - name: OTEL_EXPORTER_OTLP_ENDPOINT
+    value: http://alloy.monitoring:4318
+```
+
 ## Development
 
 Uses the [uv](https://docs.astral.sh/uv/) stack:
 
 ```bash
-uv sync
+uv sync --all-extras   # include the optional OpenTelemetry extra
 uv run ruff check . && uv run ruff format --check .
 uv run ty check          # type check (pre-1.0; advisory for now)
 uv run pytest

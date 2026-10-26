@@ -8,25 +8,29 @@ import logging
 import signal
 import sys
 
+from . import __version__, tracing
 from .bridge import Bridge
 from .client import AmbientClient
 from .config import Settings
+from .httpserver import HealthServer
+from .logs import setup_logging
 
 log = logging.getLogger("ambient2mqtt")
 
 
 async def _run() -> int:
     settings = Settings.from_env()
-    logging.basicConfig(
-        level=settings.log_level,
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
-    )
+    setup_logging(settings.log_level, settings.log_format)
     if not settings.username or not settings.password:
         log.error("AMBIENT_USERNAME / AMBIENT_PASSWORD must be set")
         return 1
 
+    tracing.setup(__version__)  # before AmbientClient, so its httpx client is instrumented
     client = AmbientClient(settings)
     bridge = Bridge(client, settings)
+    health = HealthServer(settings.metrics_port, bridge.readiness)
+    if settings.metrics_port:
+        await health.start()
 
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -41,6 +45,8 @@ async def _run() -> int:
     log.info("Shutting down...")
     runner.cancel()
     await bridge.shutdown()
+    await health.stop()
+    tracing.shutdown()
     if runner in done and runner.exception():
         log.error("bridge exited with error: %s", runner.exception())
         return 1

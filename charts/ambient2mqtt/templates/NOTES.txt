@@ -10,5 +10,12 @@ Credentials come from the existing Secret "{{ .Values.ambient.existingSecret }}"
 (keys AMBIENT_USERNAME / AMBIENT_PASSWORD). Create it before (or alongside) this release.
 {{- end }}
 
+{{- if .Values.metrics.enabled }}
+
+Metrics, liveness and readiness are served on port {{ .Values.metrics.port }}:
+  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "ambient2mqtt.fullname" . }} {{ .Values.metrics.port }}
+  curl -s localhost:{{ .Values.metrics.port }}/metrics | grep ^ambient2mqtt_
+{{- end }}
+
 Follow the bridge logs:
   kubectl logs -n {{ .Release.Namespace }} deploy/{{ include "ambient2mqtt.fullname" . }} -f

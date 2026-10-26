@@ -12,12 +12,12 @@ WORKDIR /app
 # Install deps first (cached) using only the lockfile + manifest.
 COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-install-project --no-dev
+    uv sync --frozen --no-install-project --no-dev --extra otel
 
 # Then install the project itself.
 COPY . .
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev
+    uv sync --frozen --no-dev --extra otel
 
 # ---- runtime: slim image with just the venv ----
 FROM python:3.15-slim AS runtime
@@ -30,5 +30,8 @@ COPY --from=build /app/src /app/src
 # non-root
 RUN useradd --system --uid 1000 --create-home ambient2mqtt
 USER 1000:1000
+
+# /metrics, /healthz, /readyz (METRICS_PORT)
+EXPOSE 9100
 
 ENTRYPOINT ["ambient2mqtt"]

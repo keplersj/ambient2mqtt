@@ -21,6 +21,8 @@ DEFAULT_BASE_TOPIC = "ambient2mqtt"
 DEFAULT_DISCOVERY_PREFIX = "homeassistant"
 DEFAULT_SYNC_INTERVAL = 30
 DEFAULT_LOG_LEVEL = "INFO"
+DEFAULT_LOG_FORMAT = "text"
+DEFAULT_METRICS_PORT = 9100
 
 
 def _bool(name: str, default: bool) -> bool:
@@ -72,6 +74,10 @@ class Settings:
     discovery_prefix: str = DEFAULT_DISCOVERY_PREFIX
     sync_interval: int = DEFAULT_SYNC_INTERVAL
     log_level: str = DEFAULT_LOG_LEVEL
+    log_format: str = DEFAULT_LOG_FORMAT  # "text" | "json"
+
+    # Port for /metrics, /healthz, /readyz; 0 disables the HTTP server.
+    metrics_port: int = DEFAULT_METRICS_PORT
 
     # Per-device entity-type overrides: {deviceId: "fan"|"switch"|"light"}.
     # e.g. a switch that actually drives a ceiling fan.
@@ -94,4 +100,6 @@ class Settings:
             discovery_prefix=os.environ.get("DISCOVERY_PREFIX", DEFAULT_DISCOVERY_PREFIX),
             sync_interval=int(os.environ.get("SYNC_INTERVAL", DEFAULT_SYNC_INTERVAL)),
             log_level=os.environ.get("LOG_LEVEL", DEFAULT_LOG_LEVEL),
+            log_format=os.environ.get("LOG_FORMAT", DEFAULT_LOG_FORMAT).strip().lower(),
+            metrics_port=int(os.environ.get("METRICS_PORT", DEFAULT_METRICS_PORT)),
         )
