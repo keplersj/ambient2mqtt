@@ -361,11 +361,13 @@ class Bridge:
         self.mqtt.connect_async(self.s.mqtt_host, self.s.mqtt_port, keepalive=60)
         self.mqtt.loop_start()
         await asyncio.wait_for(self._connected.wait(), timeout=30)
-        self.mqtt.publish(self.avail_topic, "online", qos=1, retain=True)
 
     def _on_connect(self, client, userdata, flags, rc):  # noqa: ANN001
         if rc == 0:
             log.info("MQTT connected")
+            # Republish on every (re)connect: a broker restart fires the LWT ("offline",
+            # retained) and nothing else would flip it back.
+            client.publish(self.avail_topic, "online", qos=1, retain=True)
             client.subscribe(f"{self.s.base_topic}/+/set")
             client.subscribe(f"{self.s.base_topic}/+/temp/set")
             client.subscribe(f"{self.s.base_topic}/+/mode/set")

@@ -1,6 +1,9 @@
 """Unit tests for the pure state/discovery mapping functions (no network, no creds)."""
 
-from ambient2mqtt.bridge import build_discovery, build_state
+from unittest.mock import MagicMock
+
+from ambient2mqtt.bridge import Bridge, build_discovery, build_state
+from ambient2mqtt.config import Settings
 
 DIMMER = {
     "deviceId": "dev-dimmer",
@@ -227,3 +230,18 @@ def test_discovery_aux_entities_distinct_ids():
 
 def test_discovery_unknown_device_empty():
     assert build_discovery(HUB, **DISCOVERY_KW) == []
+
+
+def test_on_connect_republishes_online_on_every_connect():
+    # A broker restart fires the retained LWT "offline"; reconnecting must flip it back.
+    bridge = Bridge(MagicMock(), Settings(username="u", password="p"))
+    client = MagicMock()
+    bridge._on_connect(client, None, {}, 0)
+    client.publish.assert_called_once_with(bridge.avail_topic, "online", qos=1, retain=True)
+
+
+def test_on_connect_failure_does_not_publish_online():
+    bridge = Bridge(MagicMock(), Settings(username="u", password="p"))
+    client = MagicMock()
+    bridge._on_connect(client, None, {}, 5)
+    client.publish.assert_not_called()
