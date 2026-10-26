@@ -2,7 +2,7 @@
 
 # ---- build: resolve + install into a venv with uv (locked) ----
 # Same python image as runtime so the venv's interpreter matches; Renovate bumps both together.
-FROM python:3.14-slim AS build
+FROM python:3.15-slim AS build
 COPY --from=ghcr.io/astral-sh/uv:0.13.5 /uv /uvx /bin/
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
@@ -20,7 +20,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev
 
 # ---- runtime: slim image with just the venv ----
-FROM python:3.14-slim AS runtime
+FROM python:3.15-slim AS runtime
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1
 WORKDIR /app
