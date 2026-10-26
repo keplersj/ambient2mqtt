@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import time
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx
@@ -56,7 +57,7 @@ def test_readiness_requires_mqtt_and_recent_sync(bridge):
     assert bridge.readiness() == (False, "mqtt disconnected")
     bridge._on_connect(MagicMock(), None, None, 0)
     assert bridge.readiness() == (False, "no successful sync yet")
-    bridge._last_sync = 0.0  # monotonic epoch: long ago
+    bridge._last_sync = time.monotonic() - 1000  # well past the staleness threshold
     ready, reason = bridge.readiness()
     assert not ready and "last successful sync" in reason
     bridge._last_sync = None
