@@ -245,3 +245,10 @@ def test_on_connect_failure_does_not_publish_online():
     client = MagicMock()
     bridge._on_connect(client, None, {}, 5)
     client.publish.assert_not_called()
+
+
+def test_discovery_climate_fan_mode_template_handles_missing_fan_mode():
+    # build_state omits fan_mode for unmapped values; the template must not render "".
+    (_, cfg) = next(d for d in build_discovery(THERMOSTAT, **DISCOVERY_KW) if d[0] == "climate")
+    assert "is defined" in cfg["fan_mode_state_template"]
+    assert "'None'" in cfg["fan_mode_state_template"]

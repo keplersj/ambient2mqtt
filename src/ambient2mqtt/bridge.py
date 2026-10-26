@@ -248,7 +248,11 @@ def build_discovery(
                     "mode_command_topic": f"{base}/{did}/mode/set",
                     "modes": CLIMATE_MODES,
                     "fan_mode_state_topic": state_t,
-                    "fan_mode_state_template": "{{ value_json.fan_mode }}",
+                    # State omits fan_mode when Ambient reports a mode we don't map; an empty
+                    # render is logged by HA as an invalid fan mode every sync, "None" is ignored.
+                    "fan_mode_state_template": (
+                        "{{ value_json.fan_mode if value_json.fan_mode is defined else 'None' }}"
+                    ),
                     "fan_mode_command_topic": f"{base}/{did}/fan/set",
                     "fan_modes": FAN_MODES,
                     "temperature_state_topic": state_t,
